@@ -5,11 +5,11 @@ on:
     branches: [ "main" ]
 
 env:
-  AWS_REGION: ap-northeast-2                   # AWS region, e.g. us-west-1
-  ECR_REPOSITORY: waiting-repo                  # Amazon ECR repository name
-  ECS_SERVICE: waiting-service              # Amazon ECS service name
-  ECS_CLUSTER: allclear_cluster                 # Amazon ECS cluster name
-  CONTAINER_NAME: waiting-container           # set this to the name of the container in the containerDefinitions section of your task definition
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: waiting-repo
+  ECS_SERVICE: waiting-service
+  ECS_CLUSTER: allclear_cluster
+  CONTAINER_NAME: waiting-container
 
 jobs:
   deploy:
@@ -30,15 +30,49 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: create application.yml
+      - name: Create application.yml
         if: contains(github.ref, 'main')
         run: |
-          cd ./src/main
-          mkdir -p resources 
-          cd ./resources
-          touch ./application.yml
-          ls *
-          echo "${{ secrets.APPLICATION_YML }}" > ./application.yml
+          mkdir -p ./src/main/resources
+          echo "${{ secrets.APPLICATION_YML }}" > ./src/main/resources/application.yml
+        shell: bash
+
+      - name: Add CA certificate
+        run: |
+          echo "${{ secrets.CA_CERT }}" > ca-cert.pem
+          echo "${{ secrets.PRIVATE_KEY }}" > private-key.pem
+          echo "${{ secrets.CA_CHAIN }}" > ca-chain.pem
+          openssl pkcs12 -export \
+            -in ca-cert.pem \
+            -inkey private-key.pem \
+            -out keystore.p12 \
+            -name Hanium \
+            -CAfile ca-chain.pem \
+            -caname root \
+            -passin pass:${{ secrets.KEYSTORE_PASSWORD }} \
+            -passout pass:${{ secrets.KEYSTORE_PASSWORD }}
+        shell: bash
+
+      - name: Generate keystore
+        run: |
+          keytool -importkeystore \
+            -srckeystore keystore.p12 \
+            -srcstoretype PKCS12 \
+            -srcstorepass ${{ secrets.KEYSTORE_PASSWORD }} \
+            -destkeystore hanium.jks \
+            -deststoretype JKS \
+            -deststorepass ${{ secrets.KEYSTORE_PASSWORD }} \
+            -destkeypass ${{ secrets.KEYSTORE_PASSWORD }}
+        shell: bash
+
+      - name: Verify keystore.p12 exists in root
+        run: |
+          if [ -f "keystore.p12" ]; then
+            echo "keystore.p12 was successfully created in the root directory."
+          else
+            echo "keystore.p12 not found in the root directory."
+            exit 1
+          fi
         shell: bash
 
       - name: Build with Gradle
